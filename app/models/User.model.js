@@ -58,6 +58,12 @@ let UserSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  chats: [
+    {chat: {type: Schema.Types.ObjectId, ref: "Chat"}, withUser: {type: Schema.Types.ObjectId, ref: "User"}}
+  ],
+  acceptedMessages: [
+    {message: {type: Schema.Types.ObjectId, ref: "Message"}, acceptedAt: Date}
+  ]
 }, {strict: true, timestamps: {}})
 
 UserSchema.plugin(mongoosePaginate)

@@ -1,27 +1,51 @@
 import Chat from "../models/ChatModel"
 import Claim from "../models/MemoryClaim"
+import User from "../models/User.model"
+import Message from '../models/Message.model'
 import parametersPresent from "./parametersPresent"
 
 const ChatController = {
     initChat: async (req) => {
-        parametersPresent(req.body, ["toUser", "claimId"])
-        const claim = await Claim.findById(req.body.claimId).lean()
+        parametersPresent(req.body, ["messageId"])
+        const [claim, message] = await Promise.all([Claim.findOne({createdBy: req.user.id, messageId: req.body.messageId}).lean(), Message.findById(req.body.messageId).lean()])
         if(!claim) {
             throw new Error("Not allowed")
         }
         if(!claim.approved) {
             throw new Error("How did you get so far")
         }
-        const _ = await Promise.all([Chat.findOne({user1: req.user.id, user2: req.body.toUser}).lean(), Chat.findOne({user2: req.user.id, user1: req.body.toUser}).lean()])
-        if(!_[0] && !_[1]){
+        const user = await User.findById(req.user.id)
+        //check a chat exists
+
+        // console.log(user.chats?.filter(c => {
+        //     console.log(c.withUser.toString(), message.createdBy, c.withUser.toString() === message.createdBy.toString())
+        //     return c.withUser.toString() === message.createdBy.toString()
+        // }))
+
+        const chatExists = user.chats?.filter(c => c.withUser.toString() === message.createdBy.toString())
+        if(chatExists && chatExists[0]) {
+            // console.log("Returnng existing")
+            return await Chat.findById(chatExists[0].chat)
+        }else{
+            // const _ = await Promise.all([Chat.findOne({user1: req.user.id, user2: req.body.toUser}).lean(), Chat.findOne({user2: req.user.id, user1: req.body.toUser}).lean()])
+            // console.log("Creating new", user.chats, user._id, user.name)
             const chat = new Chat({
                 user1: req.user.id,
-                user2: req.body.toUser
+                user2: message.createdBy
             })
-            await chat.save()
+            user.chats.push({
+                chat: chat._id,
+                withUser: message.createdBy
+            })
+            const toUser = await User.findById(message.createdBy)
+            toUser.chats.push({
+                chat: chat._id,
+                withUser: message.createdBy
+            })
+            await Promise.all([toUser.save(), chat.save(), user.save()])
             return chat
+            // }
         }
-        return _[0] || _[1]
     },
 
     sendMessage: async(req) => {
@@ -29,7 +53,7 @@ const ChatController = {
         if(req.body.message.length > 250) {
             throw new Error("Message can be max 250 chars")
         }
-        const chat = await Chat.findById(req.body.chatId).select('_id user1 user2').lean()
+        const chat = await Chat.findById(req.body.chatId).select('_id user1 user2 messages')
         // const chat = _[0]
 
         if(!chat) {
@@ -39,15 +63,17 @@ const ChatController = {
         if(chat.user1.toString() !== req.body.toUser && chat.user2.toString() !== req.body.toUser) {
             throw new Error("Not allowed!")
         }
-
-        const updated = await Chat.findByIdAndUpdate(req.body.chatId, {
-            $push: {
-                messages: {
-                    text: req.body.message,
-                    sender: req.user.id
-                }
-            }
+        
+        if(chat.messages.length > 50) {
+            chat.messages = chat.messages.slice(chat.messages.length - 50)
+        }
+        chat.messages.push({
+            text: req.body.message,
+            sender: req.user.id
         })
+        chat.lastMessage = req.body.message        
+        await chat.save()
+
         return {done: true}
     },
 
